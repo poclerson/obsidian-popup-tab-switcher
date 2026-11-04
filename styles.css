@@ -1,0 +1,51 @@
+.popup-tab-switcher-modal .modal {
+  max-width: 420px;
+  width: 90vw;
+  padding: 0;
+}
+
+.popup-tab-switcher-modal .pts-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.popup-tab-switcher-modal .pts-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-normal);
+}
+
+.popup-tab-switcher-modal .pts-item.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.popup-tab-switcher-modal .pts-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.popup-tab-switcher-modal .pts-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-tab-switcher-modal .pts-path {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  direction: rtl;
+  text-align: right;
+}

@@ -1,0 +1,9 @@
+{
+  "id": "popup-tab-switcher",
+  "name": "Popup Tab Switcher",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "VS Code-style Ctrl+Tab popup to switch between open tabs (most-recently-used order).",
+  "author": "Pierre-Olivier",
+  "isDesktopOnly": false
+}
