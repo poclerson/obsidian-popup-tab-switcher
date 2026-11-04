@@ -1,4 +1,4 @@
-import { Modal, Plugin, WorkspaceLeaf, setIcon } from "obsidian";
+import { Modal, Plugin, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 
 interface TabSwitcherPluginSettings {
   // reserved for future
@@ -10,6 +10,7 @@ class PopupTabSwitcherPlugin extends Plugin {
   settings: TabSwitcherPluginSettings = { ...DEFAULT_SETTINGS };
   mru: WorkspaceLeaf[] = [];
   picker: TabPickerModal | null = null;
+  private attachedFileExplorers = new Set<WorkspaceLeaf>();
   private previousSwitcherHotkeys: any = null;
   private previousWasCustom = false;
   private hadSwitcherHotkey = false;
@@ -32,6 +33,10 @@ class PopupTabSwitcherPlugin extends Plugin {
         if (leaf) this.touchLeaf(leaf);
       })
     );
+
+    this.registerEvent(this.app.workspace.on("layout-change", () => this.attachFileExplorerHandlers()));
+    // Attach after a short delay to ensure views exist.
+    window.setTimeout(() => this.attachFileExplorerHandlers(), 500);
 
     this.addCommand({
       id: "open-tab-picker",
@@ -102,6 +107,50 @@ class PopupTabSwitcherPlugin extends Plugin {
       hm.removeHotkeys?.("switcher:open");
     }
     this.hadSwitcherHotkey = false;
+  }
+
+  private attachFileExplorerHandlers(): void {
+    this.app.workspace.getLeavesOfType("file-explorer").forEach((leaf) => {
+      if (this.attachedFileExplorers.has(leaf)) return;
+      const container = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+      if (!container) return;
+      const handler = (e: MouseEvent) => this.handleFileExplorerClick(e, leaf);
+      container.addEventListener("click", handler, true);
+      this.attachedFileExplorers.add(leaf);
+      // Store handler for cleanup? Not strictly needed; plugin unload disposes.
+    });
+  }
+
+  private async handleFileExplorerClick(e: MouseEvent, leaf: WorkspaceLeaf): Promise<void> {
+    if (e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    const titleEl = target.closest(".nav-file-title") as HTMLElement | null;
+    if (!titleEl) return;
+    const path = titleEl.getAttribute("data-path");
+    if (!path) return;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return;
+
+    // If already open somewhere, focus it.
+    let existing: WorkspaceLeaf | null = null;
+    this.app.workspace.iterateAllLeaves((l) => {
+      const v: any = l.view;
+      if (v && v.file === file) existing = l;
+    });
+    if (existing) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.app.workspace.setActiveLeaf(existing, { focus: true });
+      return;
+    }
+
+    // Otherwise open in a new tab.
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const newLeaf = this.app.workspace.getLeaf("tab");
+    await newLeaf.openFile(file);
   }
 
   touchLeaf(leaf: WorkspaceLeaf): void {
@@ -256,6 +305,11 @@ class TabPickerModal extends Modal {
     });
     this.scope.register(null, "Enter", (evt) => {
       this.commit();
+      evt.preventDefault();
+      return false;
+    });
+    this.scope.register(null, "Escape", (evt) => {
+      this.close();
       evt.preventDefault();
       return false;
     });
