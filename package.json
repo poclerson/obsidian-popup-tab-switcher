@@ -1,6 +1,6 @@
 {
   "name": "obsidian-popup-tab-switcher",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "VS Code-style Ctrl+Tab tab switcher popup for Obsidian.",
   "main": "main.js",
   "type": "module",

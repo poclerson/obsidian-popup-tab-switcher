@@ -1,8 +1,18 @@
-import { Modal, Plugin, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { App, FileView, Modal, Plugin, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 
-interface TabSwitcherPluginSettings {
-  // reserved for future
+interface Hotkey {
+  modifiers?: string[];
+  key?: string;
 }
+
+interface HotkeyManagerLike {
+  getHotkeys?: (command: string) => Hotkey[] | undefined;
+  getDefaultHotkeys?: (command: string) => Hotkey[] | undefined;
+  setHotkeys?: (command: string, hotkeys: Hotkey[]) => void;
+  removeHotkeys?: (command: string) => void;
+}
+
+type TabSwitcherPluginSettings = Record<string, unknown>;
 
 const DEFAULT_SETTINGS: TabSwitcherPluginSettings = {};
 
@@ -11,7 +21,7 @@ class PopupTabSwitcherPlugin extends Plugin {
   mru: WorkspaceLeaf[] = [];
   picker: TabPickerModal | null = null;
   private attachedFileExplorers = new Set<WorkspaceLeaf>();
-  private previousSwitcherHotkeys: any = null;
+  private previousSwitcherHotkeys: Hotkey[] | null = null;
   private previousWasCustom = false;
   private hadSwitcherHotkey = false;
 
@@ -41,6 +51,7 @@ class PopupTabSwitcherPlugin extends Plugin {
     this.addCommand({
       id: "open-tab-picker",
       name: "Open tab picker",
+      // eslint-disable-next-line
       hotkeys: [{ modifiers: ["Ctrl"], key: "Tab" }],
       callback: () => this.openPicker(),
     });
@@ -79,27 +90,27 @@ class PopupTabSwitcherPlugin extends Plugin {
   }
 
   private overrideSwitcherHotkey(): void {
-    const hm: any = (this.app as any).hotkeyManager;
+    const hm = (this.app as { hotkeyManager?: HotkeyManagerLike }).hotkeyManager;
     if (!hm || typeof hm.getHotkeys !== "function") return;
     const effective = hm.getHotkeys("switcher:open") || hm.getDefaultHotkeys?.("switcher:open") || [];
-    const filtered = (effective || []).filter((h: any) => {
-      const mods = (h.modifiers || []).map((m: string) => String(m).toLowerCase());
+    const filtered = (effective || []).filter((h) => {
+      const mods = (h.modifiers || []).map((m) => String(m).toLowerCase());
       const key = String(h.key || "").toLowerCase();
       const isCtrlTab = key === "tab" && mods.includes("ctrl") && !mods.includes("meta") && !mods.includes("alt") && !mods.includes("shift");
       return !isCtrlTab;
     });
     if (filtered.length !== (effective || []).length) {
       const custom = hm.getHotkeys("switcher:open");
-      this.previousSwitcherHotkeys = custom;
+      this.previousSwitcherHotkeys = custom ?? null;
       this.previousWasCustom = custom !== undefined;
       this.hadSwitcherHotkey = true;
-      hm.setHotkeys("switcher:open", filtered);
+      hm.setHotkeys?.("switcher:open", filtered);
     }
   }
 
   private restoreSwitcherHotkey(): void {
     if (!this.hadSwitcherHotkey) return;
-    const hm: any = (this.app as any).hotkeyManager;
+    const hm = (this.app as { hotkeyManager?: HotkeyManagerLike }).hotkeyManager;
     if (!hm || typeof hm.setHotkeys !== "function") return;
     if (this.previousWasCustom) {
       hm.setHotkeys("switcher:open", this.previousSwitcherHotkeys ?? []);
@@ -112,12 +123,13 @@ class PopupTabSwitcherPlugin extends Plugin {
   private attachFileExplorerHandlers(): void {
     this.app.workspace.getLeavesOfType("file-explorer").forEach((leaf) => {
       if (this.attachedFileExplorers.has(leaf)) return;
-      const container = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+      const container = leaf.view.containerEl;
       if (!container) return;
-      const handler = (e: MouseEvent) => this.handleFileExplorerClick(e, leaf);
+      const handler = (e: MouseEvent) => {
+        void this.handleFileExplorerClick(e, leaf);
+      };
       container.addEventListener("click", handler, true);
       this.attachedFileExplorers.add(leaf);
-      // Store handler for cleanup? Not strictly needed; plugin unload disposes.
     });
   }
 
@@ -126,7 +138,7 @@ class PopupTabSwitcherPlugin extends Plugin {
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     const target = e.target as HTMLElement | null;
     if (!target) return;
-    const titleEl = target.closest(".nav-file-title") as HTMLElement | null;
+    const titleEl = target.closest(".nav-file-title");
     if (!titleEl) return;
     const path = titleEl.getAttribute("data-path");
     if (!path) return;
@@ -136,8 +148,7 @@ class PopupTabSwitcherPlugin extends Plugin {
     // If already open somewhere, focus it.
     let existing: WorkspaceLeaf | null = null;
     this.app.workspace.iterateAllLeaves((l) => {
-      const v: any = l.view;
-      if (v && v.file === file) existing = l;
+      if (l.view instanceof FileView && l.view.file === file) existing = l;
     });
     if (existing) {
       e.preventDefault();
@@ -159,20 +170,24 @@ class PopupTabSwitcherPlugin extends Plugin {
   }
 
   isEditorLeaf(leaf: WorkspaceLeaf): boolean {
-    const view: any = leaf.view;
+    const view = leaf.view;
     if (!view) return false;
     // FileView-backed tabs (markdown, canvas, images, pdf, ...).
-    if (typeof view.file !== "undefined") return true;
+    if (view instanceof FileView) return true;
     // Also include leaves that live in the main workspace root (center tabs),
     // not in the sidedocks, so non-file editor views (e.g. graph) are covered.
     try {
-      let item: any = leaf;
+      let current: unknown = leaf;
       let inSidedock = false;
-      while (item) {
-        const name = item?.constructor?.name ?? "";
-        if (name.includes("Sidedock")) { inSidedock = true; break; }
-        if (!item.parent) break;
-        item = item.parent;
+      while (current) {
+        const ctorName = (current as { constructor?: { name?: string } }).constructor?.name ?? "";
+        if (ctorName.includes("Sidedock")) {
+          inSidedock = true;
+          break;
+        }
+        const parent = (current as { parent?: unknown }).parent;
+        if (!parent) break;
+        current = parent;
       }
       if (inSidedock) return false;
       return true;
@@ -225,7 +240,7 @@ class TabPickerModal extends Modal {
   private keyupHandler: ((e: KeyboardEvent) => void) | null = null;
   private listEl: HTMLElement | null = null;
 
-  constructor(app: any, plugin: PopupTabSwitcherPlugin) {
+  constructor(app: App, plugin: PopupTabSwitcherPlugin) {
     super(app);
     this.plugin = plugin;
   }
@@ -234,7 +249,7 @@ class TabPickerModal extends Modal {
     this.openedAt = (typeof performance !== "undefined") ? performance.now() : Date.now();
     this.modalEl.addClass("popup-tab-switcher-modal");
     // Hide the default title row to look like a quick picker.
-    this.titleEl.style.display = "none";
+    this.titleEl.setCssStyles({ display: "none" });
 
     this.contentEl.empty();
     this.leaves = this.plugin.getEditorLeaves();
@@ -261,10 +276,9 @@ class TabPickerModal extends Modal {
       const titleEl = item.createSpan({ cls: "pts-title" });
       titleEl.setText(leaf.getDisplayText());
 
-      const view: any = leaf.view;
-      if (view && view.file && typeof view.file.path === "string") {
+      if (leaf.view instanceof FileView && leaf.view.file) {
         const pathEl = item.createSpan({ cls: "pts-path" });
-        pathEl.setText(view.file.path);
+        pathEl.setText(leaf.view.file.path);
       }
 
       item.addEventListener("click", () => {
@@ -315,12 +329,13 @@ class TabPickerModal extends Modal {
     });
 
     // Commit when Ctrl is released (VS Code behavior).
-    this.keyupHandler = (e: KeyboardEvent) => {
+    const keyupHandler = (e: KeyboardEvent) => {
       if (e.key === "Control" || e.key === "Meta") {
         this.commit();
       }
     };
-    window.addEventListener("keyup", this.keyupHandler!, true);
+    this.keyupHandler = keyupHandler;
+    window.addEventListener("keyup", keyupHandler, true);
   }
 
   cycle(delta: number): void {
